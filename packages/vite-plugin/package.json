@@ -1,0 +1,12 @@
+{
+  "name": "@motion-dom/vite-plugin",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "src/index.js",
+  "peerDependencies": {
+    "vite": "^5.0.0"
+  },
+  "dependencies": {
+    "glob": "^10.0.0"
+  }
+}

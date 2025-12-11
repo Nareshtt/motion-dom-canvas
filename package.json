@@ -1,0 +1,11 @@
+{
+	"name": "motion-dom-monorepo",
+	"private": true,
+	"workspaces": [
+		"packages/*",
+		"examples/*"
+	],
+	"scripts": {
+		"dev": "npm run dev --workspace=@motion-dom/playground"
+	}
+}
