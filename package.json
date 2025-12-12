@@ -6,6 +6,11 @@
 		"examples/*"
 	],
 	"scripts": {
-		"dev": "npm run dev --workspace=@motion-dom/playground"
+		"dev": "npm run dev --workspace=@motion-dom/playground",
+		"export": "npm run export --workspace=@motion-dom/playground"
+	},
+	"dependencies": {
+		"fluent-ffmpeg": "^2.1.3",
+		"puppeteer": "^24.33.0"
 	}
 }

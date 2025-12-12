@@ -1,61 +1,57 @@
-import { waitFor, all, delay } from "@motion-dom/core";
+import { all, waitFor } from "@motion-dom/core";
 
-// 1. THE VIEW (Your HTML/Tailwind)
 export const View = () => (
 	<div
-		id="background"
-		className="relative w-full h-screen bg-red-500 flex flex-col justify-center items-center overflow-hidden brightness-100"
+		id="view"
+		className="relative w-full h-full bg-[#050505] flex flex-col justify-center items-center overflow-hidden font-sans text-white"
 	>
-		{/* DECORATIVE BLOBS */}
-		<div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500 rounded-full blur-3xl opacity-20"></div>
-		<div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500 rounded-full blur-3xl opacity-20"></div>
+		{/* Background Gradient */}
+		<div className="absolute inset-0 bg-gradient-to-br from-[#1a1a1a] to-[#000000] opacity-80"></div>
 
-		{/* LOGO BOX */}
-		<div
-			id="logoBox"
-			className="z-10 bg-gradient-to-r from-blue-500 to-purple-600 w-24 h-24 rounded-full shadow-2xl scale-0 rotate-180 flex items-center justify-center overflow-hidden"
-		>
-			<div className="w-4 h-4 bg-white rounded-full"></div>
-		</div>
+		{/* Decorative Elements (Restored) */}
+		<div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-[120px]"></div>
+		<div className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] bg-purple-600/10 rounded-full blur-[100px]"></div>
 
-		{/* TEXT */}
-		<div className="z-20 text-center mt-8 absolute top-[55%]">
+		{/* Content Container */}
+		<div className="z-10 flex flex-col items-center">
+			{/* Title */}
 			<h1
-				id="mainText"
-				className="text-6xl font-black text-white uppercase tracking-tighter opacity-0"
-				style={{ textShadow: "0 10px 30px rgba(0,0,0,0.5)" }}
+				id="title"
+				className="text-9xl font-black tracking-tighter opacity-0 translate-y-10 bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400"
 			>
 				MotionDOM
 			</h1>
+
+			{/* Subtitle */}
 			<p
-				id="subText"
-				className="text-blue-200 mt-4 text-xl font-light tracking-wide opacity-0 translate-y-10"
+				id="subtitle"
+				className="mt-6 text-2xl text-zinc-400 font-light tracking-widest uppercase opacity-0 translate-y-4"
 			>
-				Productivity + Control
+				The Future of Web Animation
 			</p>
+
+			{/* Decorative Line */}
+			<div
+				id="line"
+				className="mt-8 w-0 h-[1px] bg-gradient-to-r from-transparent via-blue-500 to-transparent opacity-50"
+			></div>
 		</div>
 	</div>
 );
 
-// 2. THE ANIMATION (Your Logic)
-// We export this as a named export 'flow' (or any name you prefer)
 export function* flow() {
-	yield* waitFor(0.5);
+	// Reveal Title
+	// Using the global helper: title(targetClasses, duration)
+	yield* title("opacity-100 translate-y-0 scale-100", 1.5);
 
+	// Reveal Subtitle and Line together
 	yield* all(
-		logoBox("scale-100", 0.8),
-		logoBox("rotate-0", 0.8),
-		delay(0.2, logoBox("w-96", 0.8)),
-		delay(0.2, logoBox("rounded-2xl", 0.6))
+		subtitle("opacity-100 translate-y-0 tracking-widest", 1),
+		line("w-96 opacity-50", 1.2)
 	);
-
 	yield* all(
-		mainText("opacity-100 text-yellow-500", 1),
-		mainText("tracking-widest", 1.2),
-		delay(0.4, subText("opacity-100", 1)),
-		delay(0.4, subText("translate-y-0", 1)),
-		logoBox("from-white to-white", 1)
+		title("opacity-0", 3),
+		subtitle("opacity-0", 3),
+		line("opacity-0", 3)
 	);
-
-	yield* waitFor(1);
 }

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import chroma from "chroma-js";
 import {
 	parseTailwindValue,
@@ -11,8 +11,97 @@ import {
 
 // --- MATH & TIMING ---
 
+function map(from, to, value) {
+	return from + (to - from) * value;
+}
+
 export function easeInOutCubic(x) {
 	return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+}
+
+export function easeInCubic(x) {
+	return x * x * x;
+}
+
+export function easeOutCubic(x) {
+	return 1 - Math.pow(1 - x, 3);
+}
+
+// Back
+export function easeInBack(x) {
+	const c1 = 1.70158;
+	const c3 = c1 + 1;
+	return c3 * x * x * x - c1 * x * x;
+}
+
+export function easeOutBack(x) {
+	const c1 = 1.70158;
+	const c3 = c1 + 1;
+	return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
+}
+
+export function easeInOutBack(x) {
+	const c1 = 1.70158;
+	const c2 = c1 * 1.525;
+	return x < 0.5
+		? (Math.pow(2 * x, 2) * ((c2 + 1) * 2 * x - c2)) / 2
+		: (Math.pow(2 * x - 2, 2) * ((c2 + 1) * (x * 2 - 2) + c2) + 2) / 2;
+}
+
+// Bounce
+export function easeOutBounce(x) {
+	const n1 = 7.5625;
+	const d1 = 2.75;
+
+	if (x < 1 / d1) {
+		return n1 * x * x;
+	} else if (x < 2 / d1) {
+		return n1 * (x -= 1.5 / d1) * x + 0.75;
+	} else if (x < 2.5 / d1) {
+		return n1 * (x -= 2.25 / d1) * x + 0.9375;
+	} else {
+		return n1 * (x -= 2.625 / d1) * x + 0.984375;
+	}
+}
+
+export function easeInBounce(x) {
+	return 1 - easeOutBounce(1 - x);
+}
+
+export function easeInOutBounce(x) {
+	return x < 0.5
+		? (1 - easeOutBounce(1 - 2 * x)) / 2
+		: (1 + easeOutBounce(2 * x - 1)) / 2;
+}
+
+// Elastic
+export function easeOutElastic(x) {
+	const c4 = (2 * Math.PI) / 3;
+	return x === 0
+		? 0
+		: x === 1
+		? 1
+		: Math.pow(2, -10 * x) * Math.sin((x * 10 - 0.75) * c4) + 1;
+}
+
+export function easeInElastic(x) {
+	const c4 = (2 * Math.PI) / 3;
+	return x === 0
+		? 0
+		: x === 1
+		? 1
+		: -Math.pow(2, 10 * x - 10) * Math.sin((x * 10 - 10.75) * c4);
+}
+
+export function easeInOutElastic(x) {
+	const c5 = (2 * Math.PI) / 4.5;
+	return x === 0
+		? 0
+		: x === 1
+		? 1
+		: x < 0.5
+		? -(Math.pow(2, 20 * x - 10) * Math.sin((20 * x - 11.125) * c5)) / 2
+		: (Math.pow(2, -20 * x + 10) * Math.sin((20 * x - 11.125) * c5)) / 2 + 1;
 }
 
 export function lerp(a, b, t) {
@@ -33,15 +122,71 @@ export function* waitFor(duration) {
 	}
 }
 
+let isCalculating = false;
+
+export function calculateDuration(generatorFn) {
+	isCalculating = true;
+
+	// 1. Identify potential globals used in the generator
+	const code = generatorFn.toString();
+	const identifiers = new Set();
+	// Regex to find function calls: name(
+	const regex = /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
+	let match;
+	while ((match = regex.exec(code)) !== null) {
+		identifiers.add(match[1]);
+	}
+
+	// 2. Mock missing globals
+	const mocked = [];
+	identifiers.forEach((id) => {
+		if (typeof window[id] === "undefined") {
+			// Mock it
+			window[id] = (...args) => {
+				// Assume last arg is duration if number, else 0
+				const last = args[args.length - 1];
+				const duration = typeof last === "number" ? last : 0;
+				return tween(duration, () => {});
+			};
+			mocked.push(id);
+		}
+	});
+
+	try {
+		const iterator = generatorFn();
+		let time = 0;
+		const dt = 1 / 60; // Simulation step
+
+		let result = iterator.next();
+		while (!result.done) {
+			time += dt;
+			result = iterator.next(dt);
+		}
+		return time;
+	} catch (e) {
+		return 0;
+	} finally {
+		// 3. Cleanup
+		mocked.forEach((id) => {
+			delete window[id];
+		});
+		isCalculating = false;
+	}
+}
+
 export function* tween(duration, onUpdate) {
 	let time = 0;
 	while (time < duration) {
 		const dt = yield;
 		time += dt || 0;
-		const progress = Math.min(time / duration, 1);
-		onUpdate(progress);
+		if (!isCalculating) {
+			const progress = Math.min(time / duration, 1);
+			onUpdate(progress);
+		}
 	}
-	onUpdate(1);
+	if (!isCalculating) {
+		onUpdate(1);
+	}
 }
 
 // --- FLOW CONTROL ---
@@ -60,9 +205,27 @@ export function* all(...tasks) {
 	}
 }
 
+export function* chain(...tasks) {
+	for (const task of tasks) {
+		yield* task;
+	}
+}
+
 export function* delay(seconds, task) {
 	yield* waitFor(seconds);
 	yield* task;
+}
+
+export function* slide(duration = 1) {
+	yield* waitFor(duration);
+}
+
+export function* fade(duration = 1) {
+	yield* waitFor(duration);
+}
+
+export function* zoom(duration = 1) {
+	yield* waitFor(duration);
 }
 
 // --- INTELLIGENT GETTERS ---
@@ -80,7 +243,6 @@ function getColorFromInlineStyle(el, prop) {
 		if (val) {
 			const color = getRgbaFromColor(val);
 			if (color[3] !== 0) {
-				console.log(`📌 Got ${prop} from inline style:`, color);
 				return color;
 			}
 		}
@@ -105,13 +267,10 @@ function getColorFromClass(el, prop) {
 	);
 	if (!gradientClass) return null;
 
-	console.log(`🔍 Found current class: ${gradientClass}`);
-
 	// Extract color name and resolve it
 	const colorName = extractColorFromGradientClass(gradientClass);
 	if (colorName) {
 		const bgClass = `bg-${colorName}`;
-		console.log(`🎨 Resolving ${gradientClass} as ${bgClass}`);
 		return resolveTailwindColor(bgClass, "backgroundColor");
 	}
 
@@ -130,9 +289,6 @@ function getCurrentValue(el, prop, unit) {
 			if (classColor && classColor[3] !== 0) return classColor;
 
 			// 3. Fallback to background color
-			console.log(
-				`⚠️ No gradient color found for ${prop}, using backgroundColor`
-			);
 			const computed = window.getComputedStyle(el);
 			return getRgbaFromColor(computed.backgroundColor);
 		}
@@ -172,7 +328,6 @@ function* createAnimation(id, ...args) {
 	} else if (args.length === 2) {
 		[toString, duration] = args;
 	} else {
-		console.error("animate needs 2+ args");
 		return;
 	}
 
@@ -189,8 +344,6 @@ function* createAnimation(id, ...args) {
 		el.classList.add("bg-gradient-to-r");
 	}
 
-	console.log(`\n🎬 Animating ${id} to: ${toString}`);
-
 	const tasks = [];
 
 	toClasses.forEach((toClass, index) => {
@@ -198,13 +351,10 @@ function* createAnimation(id, ...args) {
 		if (!propDef) return;
 		const { prop, unit } = propDef;
 
-		console.log(`\n🔧 Processing ${toClass} -> ${prop}`);
-
 		// Get START value
 		let startVal;
 		if (fromClasses.length > index) {
 			const fromClass = fromClasses[index];
-			console.log(`📍 START from explicit class: ${fromClass}`);
 
 			if (unit === "color") {
 				// For gradient classes, extract the color part
@@ -223,13 +373,11 @@ function* createAnimation(id, ...args) {
 				startVal = parseTailwindValue(fromClass);
 			}
 		} else {
-			console.log(`📍 START from current value`);
 			startVal = getCurrentValue(el, prop, unit);
 		}
 
 		// Get END value
 		let endVal;
-		console.log(`🎯 END from class: ${toClass}`);
 
 		if (unit === "color") {
 			// For gradient classes, extract the color part
@@ -240,7 +388,6 @@ function* createAnimation(id, ...args) {
 			) {
 				const colorName = extractColorFromGradientClass(toClass);
 				const bgClass = `bg-${colorName}`;
-				console.log(`   Converting ${toClass} -> ${bgClass}`);
 				endVal = resolveTailwindColor(bgClass, "backgroundColor");
 			} else {
 				endVal = resolveTailwindColor(toClass, prop);
@@ -248,9 +395,6 @@ function* createAnimation(id, ...args) {
 		} else {
 			endVal = parseTailwindValue(toClass);
 		}
-
-		console.log(`   START:`, startVal);
-		console.log(`   END:`, endVal);
 
 		// Adjust non-color values
 		if (unit !== "color") {
@@ -306,37 +450,98 @@ function* createAnimation(id, ...args) {
 	});
 }
 
-function setupGlobals() {
+export function setupGlobals() {
 	document.querySelectorAll("[id]").forEach((el) => {
 		window[el.id] = (...args) => createAnimation(el.id, ...args);
 	});
 }
 
-export function useScene(animationCallback, onFinished) {
+// --- THE CRITICAL useScene HOOK ---
+
+export function useScene(
+	animationCallback,
+	onFinished,
+	isPlaying = true,
+	seekOffset = 0
+) {
+	const iteratorRef = useRef(null);
+	const requestIdRef = useRef(null);
+
 	useEffect(() => {
+		// 1. Check for Render Mode
+		const urlParams = new URLSearchParams(window.location.search);
+		const isRenderMode = urlParams.get("render") === "true";
+
 		setupGlobals();
-		const iterator = animationCallback();
-		let isRunning = true;
-		let lastTime = null;
 
-		const loop = (time) => {
-			if (!isRunning) return;
-			if (lastTime === null) {
-				lastTime = time;
-				requestAnimationFrame(loop);
-				return;
+		// 2. Initialize iterator with current seek position
+		const initIterator = () => {
+			const iterator = animationCallback();
+
+			// Fast-forward to seekOffset if needed
+			if (seekOffset > 0) {
+				let t = 0;
+				const dt = 1 / 60; // Simulation step
+
+				while (t < seekOffset) {
+					const step = Math.min(dt, seekOffset - t);
+					const result = iterator.next(step);
+
+					if (result.done) {
+						if (onFinished) onFinished();
+						return null;
+					}
+
+					t += step;
+				}
 			}
-			let dt = (time - lastTime) / 1000;
-			lastTime = time;
-			if (dt > 0.1) dt = 0.1;
 
-			const result = iterator.next(dt);
-			if (!result.done) requestAnimationFrame(loop);
-			else if (onFinished) onFinished();
+			return iterator;
 		};
-		requestAnimationFrame(loop);
+
+		// Always recreate iterator to match current seekOffset
+		iteratorRef.current = initIterator();
+
+		if (!iteratorRef.current) return;
+
+		// --- RENDER MODE (Exporting) ---
+		if (isRenderMode) {
+			window.currentIterator = iteratorRef.current;
+			if (window.onSceneReady) window.onSceneReady();
+			return;
+		}
+
+		// --- PLAYBACK MODE (Browser) ---
+		if (isPlaying) {
+			let lastTime = performance.now();
+
+			const loop = (now) => {
+				const dt = Math.min((now - lastTime) / 1000, 0.1); // Cap at 0.1s
+				lastTime = now;
+
+				const result = iteratorRef.current.next(dt);
+
+				if (!result.done) {
+					requestIdRef.current = requestAnimationFrame(loop);
+				} else {
+					if (onFinished) onFinished();
+				}
+			};
+
+			requestIdRef.current = requestAnimationFrame(loop);
+		} else {
+		}
+
 		return () => {
-			isRunning = false;
+			if (requestIdRef.current) {
+				cancelAnimationFrame(requestIdRef.current);
+				requestIdRef.current = null;
+			}
 		};
-	}, [animationCallback]);
+
+		// Dependencies:
+		// - animationCallback: Changes when scene changes
+		// - isPlaying: Toggles playback on/off
+		// - seekOffset: Updates position (causes iterator recreation)
+	}, [animationCallback, isPlaying, seekOffset, onFinished]);
 }
