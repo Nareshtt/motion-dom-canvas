@@ -466,6 +466,7 @@ export function useScene(
 ) {
 	const iteratorRef = useRef(null);
 	const requestIdRef = useRef(null);
+	const iteratorTimeRef = useRef(0); // Track the iterator's internal time
 
 	useEffect(() => {
 		// 1. Check for Render Mode
@@ -476,31 +477,47 @@ export function useScene(
 
 		// 2. Initialize iterator with current seek position
 		const initIterator = () => {
+			console.log(`🔄 initIterator: seekOffset=${seekOffset.toFixed(3)}`);
 			const iterator = animationCallback();
+			let currentTime = 0;
 
 			// Fast-forward to seekOffset if needed
 			if (seekOffset > 0) {
-				let t = 0;
 				const dt = 1 / 60; // Simulation step
-
-				while (t < seekOffset) {
-					const step = Math.min(dt, seekOffset - t);
+				// If seeking far ahead, this loop can be heavy.
+				// For now, it's the only way to get to the state.
+				while (currentTime < seekOffset) {
+					const step = Math.min(dt, seekOffset - currentTime);
 					const result = iterator.next(step);
-
 					if (result.done) {
 						if (onFinished) onFinished();
 						return null;
 					}
-
-					t += step;
+					currentTime += step;
 				}
 			}
-
+			iteratorTimeRef.current = currentTime;
 			return iterator;
 		};
 
-		// Always recreate iterator to match current seekOffset
-		iteratorRef.current = initIterator();
+		// Logic to determine if we need to re-initialize (Seek)
+		// 1. If we don't have an iterator, we must init.
+		// 2. If we ARE NOT playing, we trust seekOffset 100%.
+		// 3. If we ARE playing, we only re-init if the drift is significant (user seek).
+		//    Small drifts are expected due to frame timing differences.
+		const timeDiff = Math.abs(iteratorTimeRef.current - seekOffset);
+
+		// Threshold: 0.5s is generous enough to absorb frame jitter but small enough to catch seeks.
+		// If the user drags the timeline, seekOffset changes rapidly.
+		const isSeeking = timeDiff > 0.5;
+
+		if (
+			!iteratorRef.current ||
+			(!isPlaying && timeDiff > 0.01) ||
+			(isPlaying && isSeeking)
+		) {
+			iteratorRef.current = initIterator();
+		}
 
 		if (!iteratorRef.current) return;
 
@@ -520,6 +537,7 @@ export function useScene(
 				lastTime = now;
 
 				const result = iteratorRef.current.next(dt);
+				iteratorTimeRef.current += dt; // Update internal time
 
 				if (!result.done) {
 					requestIdRef.current = requestAnimationFrame(loop);
