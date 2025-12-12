@@ -1,16 +1,19 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useScene, calculateDuration } from "@motion-dom/core";
-import scenesData from "virtual:motion-dom-scenes";
+import projectData from "virtual:motion-dom-scenes";
 import { Timeline } from "./components/Timeline";
 import { Viewport } from "./components/Viewport";
 
 // Main App
 function App() {
 	const [scenes, setScenes] = useState([]);
+	const [audio, setAudio] = useState(null);
+	const [volume, setVolume] = useState(1);
 	const [sceneIndex, setSceneIndex] = useState(0);
 	const [isPlaying, setIsPlaying] = useState(true);
 	const [currentTime, setCurrentTime] = useState(0);
 	const sceneIndexRef = useRef(0);
+	const audioRef = useRef(null);
 
 	// Check if we are in render mode (exporting)
 	const [isRenderMode] = useState(() => {
@@ -24,18 +27,38 @@ function App() {
 	// Calculate durations on mount
 	useEffect(() => {
 		console.log("Calculating scene durations...");
-		const processed = scenesData.map((scene) => {
+		const processedScenes = projectData.scenes.map((scene) => {
 			const duration = calculateDuration(scene.flow);
 			console.log(`Scene ${scene.name} duration: ${duration}s`);
 			return { ...scene, duration };
 		});
-		setScenes(processed);
+		setScenes(processedScenes);
+		setAudio(projectData.audio);
 	}, []);
 
 	// Sync ref with state
 	useEffect(() => {
 		sceneIndexRef.current = sceneIndex;
 	}, [sceneIndex]);
+
+	// Audio Sync Effect
+	useEffect(() => {
+		if (!audioRef.current || isRenderMode) return;
+
+		audioRef.current.volume = volume;
+
+		if (isPlaying) {
+			// Sync audio to current time if it drifted
+			if (Math.abs(audioRef.current.currentTime - currentTime) > 0.1) {
+				audioRef.current.currentTime = currentTime;
+			}
+			audioRef.current
+				.play()
+				.catch((e) => console.warn("Audio play failed:", e));
+		} else {
+			audioRef.current.pause();
+		}
+	}, [isPlaying, audio, volume]);
 
 	const handleSceneFinish = () => {
 		if (sceneIndex < scenes.length - 1) {
@@ -122,6 +145,11 @@ function App() {
 		// Update global time
 		setCurrentTime(time);
 
+		// Sync Audio
+		if (audioRef.current) {
+			audioRef.current.currentTime = time;
+		}
+
 		// Find which scene this time belongs to
 		let accumulatedTime = 0;
 		for (let i = 0; i < scenes.length; i++) {
@@ -142,6 +170,10 @@ function App() {
 		setIsPlaying(false);
 		setCurrentTime(0);
 		setSceneIndex(0);
+		if (audioRef.current) {
+			audioRef.current.pause();
+			audioRef.current.currentTime = 0;
+		}
 	};
 
 	if (!scenes || scenes.length === 0) {
@@ -166,6 +198,9 @@ function App() {
 
 	return (
 		<div className="w-full h-screen flex flex-col bg-black overflow-hidden relative">
+			{/* Audio Element */}
+			{audio && <audio ref={audioRef} src={audio} />}
+
 			{/* Viewport */}
 			<div className="viewport-export-target flex-1 relative overflow-hidden flex flex-col min-h-0 bg-black">
 				<Viewport>
@@ -212,6 +247,9 @@ function App() {
 			{!isRenderMode && (
 				<Timeline
 					scenes={scenes}
+					audio={audio}
+					volume={volume}
+					onVolumeChange={setVolume}
 					currentScene={sceneIndex}
 					onSceneChange={(index) => {
 						console.log(`📍 Jumping to scene ${index}`);
@@ -221,6 +259,9 @@ function App() {
 							.slice(0, index)
 							.reduce((acc, s) => acc + (s.duration || 0), 0);
 						setCurrentTime(newTime);
+						if (audioRef.current) {
+							audioRef.current.currentTime = newTime;
+						}
 					}}
 					isPlaying={isPlaying}
 					onPlayPause={() => {

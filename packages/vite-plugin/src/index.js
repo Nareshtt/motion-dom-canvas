@@ -211,21 +211,40 @@ export default function motionDom() {
 					)}s`
 				);
 
-				// 5. Generate Code
+				// 5. Check for Audio
+				const audioExtensions = ["mp3", "wav", "ogg"];
+				let audioPath = null;
+				for (const ext of audioExtensions) {
+					const path = `src/audio/audio.${ext}`;
+					if (fs.existsSync(path)) {
+						audioPath = path;
+						console.log(`🎵 [MotionDOM] Found audio: ${path}`);
+						break;
+					}
+				}
+
+				// 6. Generate Code
 				const imports = parsedScenes
 					.map((scene, i) => `import * as scene_${i} from '/${scene.path}';`)
 					.join("\n");
 
-				const exports = `export default [${parsedScenes
-					.map(
-						(scene, i) =>
-							`{ ...scene_${i}, name: "${scene.name}", duration: ${
-								scene.duration
-							}, transition: ${JSON.stringify(scene.transition)} }`
-					)
-					.join(", ")}];`;
+				const audioImport = audioPath
+					? `import audioUrl from '/${audioPath}';`
+					: "const audioUrl = null;";
 
-				return `${imports}\n\n${exports}`;
+				const exports = `export default {
+					scenes: [${parsedScenes
+						.map(
+							(scene, i) =>
+								`{ ...scene_${i}, name: "${scene.name}", duration: ${
+									scene.duration
+								}, transition: ${JSON.stringify(scene.transition)} }`
+						)
+						.join(", ")}],
+					audio: audioUrl
+				};`;
+
+				return `${imports}\n${audioImport}\n\n${exports}`;
 			}
 		},
 

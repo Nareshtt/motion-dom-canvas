@@ -20,6 +20,9 @@ export function Timeline({
 	currentTime,
 	totalDuration,
 	onSeek,
+	audio,
+	volume = 1,
+	onVolumeChange,
 }) {
 	const trackRef = useRef(null);
 	const scrollContainerRef = useRef(null);
@@ -157,6 +160,22 @@ export function Timeline({
 					>
 						<SkipForward size={16} />
 					</button>
+
+					{/* Volume Control */}
+					{audio && onVolumeChange && (
+						<div className="flex items-center gap-2 ml-4 border-l border-white/10 pl-4">
+							<span className="text-xs text-zinc-500 font-medium">VOL</span>
+							<input
+								type="range"
+								min="0"
+								max="1"
+								step="0.1"
+								value={volume}
+								onChange={(e) => onVolumeChange(parseFloat(e.target.value))}
+								className="w-20 h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+							/>
+						</div>
+					)}
 				</div>
 
 				{/* Center: Time Display */}
@@ -199,101 +218,124 @@ export function Timeline({
 					/>
 				</div>
 
-				{/* Tracks Container */}
-				<div
-					ref={trackRef}
-					onMouseDown={handleTimelineClick}
-					onMouseMove={handleMouseMove}
-					className="flex-1 relative cursor-pointer"
-					style={{
-						width: "100%",
-						height: "100%",
-						backgroundImage:
-							"linear-gradient(to bottom, rgba(255,255,255,0.02) 1px, transparent 1px)",
-						backgroundSize: "100% 40px",
-					}}
-				>
-					{/* Scene Track */}
+				{/* Tracks Area */}
+				<div className="flex-1 flex flex-col min-h-0">
+					{/* Tracks Container */}
 					<div
-						className="absolute top-4 h-12"
-						style={{ transform: `translateX(${-scrollLeft}px)` }}
+						ref={trackRef}
+						onMouseDown={handleTimelineClick}
+						onMouseMove={handleMouseMove}
+						className="flex-1 relative cursor-pointer overflow-hidden bg-[#0a0a0a]"
+						style={{
+							backgroundImage:
+								"linear-gradient(to bottom, rgba(255,255,255,0.02) 1px, transparent 1px)",
+							backgroundSize: "100% 40px",
+						}}
 					>
-						{scenes.map((scene, i) => {
-							// Calculate accurate start time by summing all previous scene durations
-							const startSeconds = scenes
-								.slice(0, i)
-								.reduce((acc, s) => acc + (s.duration || 0), 0);
+						<div
+							className="absolute inset-0"
+							style={{
+								transform: `translateX(${-scrollLeft}px)`,
+								width: `${totalDuration * zoom}px`,
+							}}
+						>
+							{/* Scenes Track */}
+							<div className="absolute top-2 h-12 w-full">
+								{scenes.map((scene, i) => {
+									const startSeconds = scenes
+										.slice(0, i)
+										.reduce((acc, s) => acc + (s.duration || 0), 0);
+									const durationSeconds = scene.duration || 0;
+									const startPx = startSeconds * zoom;
+									const widthPx = durationSeconds * zoom;
+									const isActive = i === currentScene;
 
-							// Use the scene's actual duration
-							const durationSeconds = scene.duration || 0;
-
-							// Convert to pixels using current zoom
-							const startPx = startSeconds * zoom;
-							const widthPx = durationSeconds * zoom;
-
-							const isActive = i === currentScene;
-
-							// Debug log for first render
-							if (i === 0) {
-								console.log(`🎬 Scene ${i} rendering:`, {
-									startSeconds,
-									durationSeconds,
-									startPx,
-									widthPx,
-									zoom,
-								});
-							}
-
-							return (
-								<div
-									key={i}
-									className={`absolute top-0 bottom-0 rounded-lg overflow-hidden transition-all duration-300 group border ${
-										isActive
-											? "bg-zinc-800/80 border-blue-500/30 shadow-[0_0_20px_rgba(59,130,246,0.1)]"
-											: "bg-zinc-900/40 border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800/40"
-									}`}
-									style={{
-										left: `${startPx}px`,
-										width: `${Math.max(widthPx - 2, 20)}px`, // Minimum 20px width
-									}}
-									title={`${scene.name} - ${durationSeconds.toFixed(2)}s`}
-								>
-									<div
-										className={`px-3 py-2.5 text-xs font-medium truncate capitalize transition-colors flex items-center gap-2 ${
-											isActive
-												? "text-blue-100"
-												: "text-zinc-500 group-hover:text-zinc-400"
-										}`}
-									>
-										<span
-											className={`w-1.5 h-1.5 rounded-full ${
-												isActive ? "bg-blue-500" : "bg-zinc-700"
+									return (
+										<div
+											key={i}
+											className={`absolute top-0 bottom-0 rounded-lg overflow-hidden transition-all duration-300 group border ${
+												isActive
+													? "bg-zinc-800/80 border-blue-500/30 shadow-[0_0_20px_rgba(59,130,246,0.1)]"
+													: "bg-zinc-900/40 border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800/40"
 											}`}
+											style={{
+												left: `${startPx}px`,
+												width: `${Math.max(widthPx - 2, 20)}px`,
+											}}
+											onClick={(e) => {
+												e.stopPropagation();
+												onSceneChange(i);
+											}}
+											title={`${scene.name} - ${durationSeconds.toFixed(2)}s`}
+										>
+											<div
+												className={`px-3 py-2.5 text-xs font-medium truncate capitalize transition-colors flex items-center gap-2 ${
+													isActive
+														? "text-blue-100"
+														: "text-zinc-500 group-hover:text-zinc-400"
+												}`}
+											>
+												<span
+													className={`w-1.5 h-1.5 rounded-full ${
+														isActive ? "bg-blue-500" : "bg-zinc-700"
+													}`}
+												/>
+												{scene.name}
+												<span className="text-[10px] opacity-50 ml-auto">
+													{durationSeconds.toFixed(1)}s
+												</span>
+											</div>
+										</div>
+									);
+								})}
+							</div>
+
+							{/* Audio Track */}
+							{audio && (
+								<div className="absolute top-16 h-10 w-full">
+									<div
+										className="absolute top-0 bottom-0 rounded-lg overflow-hidden border bg-emerald-900/20 border-emerald-500/30 shadow-[0_0_20px_rgba(16,185,129,0.05)]"
+										style={{
+											left: 0,
+											width: `${totalDuration * zoom}px`,
+										}}
+									>
+										<div className="px-3 py-2.5 text-xs font-medium truncate flex items-center gap-2 text-emerald-200/70">
+											<span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+											Audio Track
+											<span className="text-[10px] opacity-50 ml-auto">
+												{totalDuration.toFixed(1)}s
+											</span>
+										</div>
+										{/* Waveform visual placeholder */}
+										<div
+											className="absolute bottom-0 left-0 right-0 h-1 opacity-30"
+											style={{
+												backgroundImage:
+													"linear-gradient(90deg, transparent 0%, #10b981 50%, transparent 100%)",
+												backgroundSize: "20px 100%",
+											}}
 										/>
-										{scene.name || `Scene ${i + 1}`}
-										<span className="text-[10px] opacity-50 ml-auto">
-											{durationSeconds.toFixed(1)}s
-										</span>
 									</div>
 								</div>
-							);
-						})}
+							)}
 
-						{/* Infinite Line */}
+							{/* Infinite Line */}
+							<div
+								className="absolute top-1/2 -translate-y-1/2 h-px bg-zinc-800/50"
+								style={{ left: totalDuration * zoom, width: "10000px" }}
+							></div>
+						</div>
+
+						{/* Playhead */}
 						<div
-							className="absolute top-1/2 -translate-y-1/2 h-px bg-zinc-800/50"
-							style={{ left: totalDuration * zoom, width: "10000px" }}
-						></div>
-					</div>
-
-					{/* Playhead */}
-					<div
-						className="absolute top-0 bottom-0 w-px bg-blue-500 z-30 pointer-events-none shadow-[0_0_10px_rgba(59,130,246,0.8)]"
-						style={{ left: `${currentTime * zoom - scrollLeft}px` }}
-					>
-						{/* Playhead Handle */}
-						<div className="absolute -top-3 left-1/2 -translate-x-1/2">
-							<div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[8px] border-t-blue-500 filter drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]"></div>
+							className="absolute top-0 bottom-0 w-px bg-blue-500 z-30 pointer-events-none shadow-[0_0_10px_rgba(59,130,246,0.8)]"
+							style={{ left: `${currentTime * zoom - scrollLeft}px` }}
+						>
+							{/* Playhead Handle */}
+							<div className="absolute -top-3 left-1/2 -translate-x-1/2">
+								<div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[8px] border-t-blue-500 filter drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]"></div>
+							</div>
 						</div>
 					</div>
 				</div>
