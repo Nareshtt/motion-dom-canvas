@@ -34,6 +34,11 @@ function App() {
 		});
 		setScenes(processedScenes);
 		setAudio(projectData.audio);
+
+		// Signal that scenes are loaded (for export script)
+		if (typeof window !== "undefined") {
+			window.scenesLoaded = true;
+		}
 	}, []);
 
 	// Sync ref with state
@@ -48,7 +53,6 @@ function App() {
 		audioRef.current.volume = volume;
 
 		if (isPlaying) {
-			// Sync audio to current time if it drifted
 			if (Math.abs(audioRef.current.currentTime - currentTime) > 0.1) {
 				audioRef.current.currentTime = currentTime;
 			}
@@ -64,14 +68,13 @@ function App() {
 		if (sceneIndex < scenes.length - 1) {
 			console.log(`🎬 Scene ${sceneIndex} finished. Playing next...`);
 			setSceneIndex((prev) => prev + 1);
-			// Don't reset currentTime - let it flow naturally through scenes
 		} else {
 			console.log("✅ All scenes finished.");
 			setIsPlaying(false);
 		}
 	};
 
-	// Update currentTime during playback using high-precision timer
+	// Update currentTime during playback
 	useEffect(() => {
 		if (!isPlaying || isRenderMode) return;
 
@@ -79,12 +82,11 @@ function App() {
 		let lastTime = performance.now();
 
 		const updateTime = (now) => {
-			const dt = (now - lastTime) / 1000; // Convert to seconds
+			const dt = (now - lastTime) / 1000;
 			lastTime = now;
 
 			setCurrentTime((prev) => {
 				const newTime = prev + dt;
-				// Clamp to total duration
 				const totalDuration = scenes.reduce(
 					(acc, s) => acc + (s.duration || 0),
 					0
@@ -104,19 +106,27 @@ function App() {
 		};
 	}, [isPlaying, scenes, isRenderMode]);
 
-	// Export Logic
+	// Export Logic - FIXED VERSION
 	useEffect(() => {
 		if (isRenderMode && scenes.length > 0) {
+			let exportTime = 0; // Track total export time across all scenes
+
 			window.nextFrame = async (fps) => {
-				if (!window.currentIterator) return false;
+				if (!window.currentIterator) {
+					console.error("No current iterator!");
+					return true;
+				}
 
 				const dt = 1 / fps;
 				const result = window.currentIterator.next(dt);
+				exportTime += dt;
 
 				if (result.done) {
 					// Scene finished
 					if (sceneIndexRef.current < scenes.length - 1) {
-						console.log("🎬 Scene finished (export). Moving to next...");
+						console.log(
+							`🎬 Scene ${sceneIndexRef.current} finished (export). Moving to next...`
+						);
 
 						// Trigger next scene
 						setSceneIndex((prev) => prev + 1);
@@ -127,10 +137,13 @@ function App() {
 								window.onSceneReady = null;
 								resolve();
 							};
+							// Timeout safety
+							setTimeout(resolve, 1000);
 						});
 
 						return false; // Continue capturing
 					} else {
+						console.log("🎉 All scenes exported!");
 						return true; // All done
 					}
 				}
@@ -140,17 +153,12 @@ function App() {
 	}, [isRenderMode, scenes]);
 
 	const handleSeek = (time) => {
-		console.log(`🎯 Seeking to ${time.toFixed(2)}s`);
-
-		// Update global time
 		setCurrentTime(time);
 
-		// Sync Audio
 		if (audioRef.current) {
 			audioRef.current.currentTime = time;
 		}
 
-		// Find which scene this time belongs to
 		let accumulatedTime = 0;
 		for (let i = 0; i < scenes.length; i++) {
 			const sceneDuration = scenes[i].duration || 10;
@@ -184,47 +192,65 @@ function App() {
 		);
 	}
 
-	// Calculate total duration
+	const currentSceneData = scenes[sceneIndex];
+
+	// Check if scene is valid
+	if (!currentSceneData || !currentSceneData.View || !currentSceneData.flow) {
+		return (
+			<div className="flex flex-col items-center justify-center w-full h-screen bg-black text-white gap-4">
+				<div className="text-red-500 text-xl font-bold">⚠️ Scene Error</div>
+				<div className="text-zinc-400">
+					Scene {sceneIndex} is missing View or flow export
+				</div>
+				<div className="text-sm text-zinc-600">
+					Scene data: {JSON.stringify(currentSceneData?.name || "undefined")}
+				</div>
+			</div>
+		);
+	}
+
 	const totalDuration = scenes.reduce(
 		(acc, scene) => acc + (scene.duration || 0),
 		0
 	);
 
-	// Calculate offset for current scene
 	const sceneStart = scenes
 		.slice(0, sceneIndex)
 		.reduce((acc, s) => acc + (s.duration || 0), 0);
 	const sceneOffset = Math.max(0, currentTime - sceneStart);
 
+	// In render mode, we don't render transitions separately
+	// The transition is part of the scene's flow animation
+	const shouldRenderTransition =
+		!isRenderMode &&
+		scenes[sceneIndex]?.transition &&
+		sceneIndex > 0 &&
+		sceneOffset < scenes[sceneIndex].transition.duration;
+
 	return (
 		<div className="w-full h-screen flex flex-col bg-black overflow-hidden relative">
-			{/* Audio Element */}
 			{audio && <audio ref={audioRef} src={audio} />}
 
-			{/* Viewport */}
 			<div className="viewport-export-target flex-1 relative overflow-hidden flex flex-col min-h-0 bg-black">
 				<Viewport>
-					{/* Previous Scene (during transition) */}
-					{scenes[sceneIndex]?.transition &&
-						sceneIndex > 0 &&
-						sceneOffset < scenes[sceneIndex].transition.duration && (
-							<div className="absolute inset-0 z-0">
-								<SceneWrapper
-									key={sceneIndex - 1}
-									scene={scenes[sceneIndex - 1]}
-									onFinished={() => {}}
-									isPlaying={false}
-									seekOffset={scenes[sceneIndex - 1].duration || 0} // Show end state
-								/>
-							</div>
-						)}
+					{/* Previous Scene (during transition - ONLY in playback mode) */}
+					{shouldRenderTransition && (
+						<div className="absolute inset-0 z-0">
+							<SceneWrapper
+								key={`prev-${sceneIndex - 1}`}
+								scene={scenes[sceneIndex - 1]}
+								onFinished={() => {}}
+								isPlaying={false}
+								seekOffset={scenes[sceneIndex - 1].duration || 0}
+							/>
+						</div>
+					)}
 
 					{/* Current Scene */}
 					<div
 						className="absolute inset-0 z-10"
 						style={
-							scenes[sceneIndex]?.transition &&
-							sceneOffset < scenes[sceneIndex].transition.duration
+							shouldRenderTransition
 								? getTransitionStyle(
 										scenes[sceneIndex].transition.type,
 										sceneOffset / scenes[sceneIndex].transition.duration
@@ -233,17 +259,17 @@ function App() {
 						}
 					>
 						<SceneWrapper
-							key={sceneIndex}
+							key={`scene-${sceneIndex}-${scenes[sceneIndex]?.name}`}
 							scene={scenes[sceneIndex]}
 							onFinished={handleSceneFinish}
 							isPlaying={isPlaying}
 							seekOffset={isRenderMode ? 0 : sceneOffset}
+							isRenderMode={isRenderMode}
 						/>
 					</div>
 				</Viewport>
 			</div>
 
-			{/* Timeline */}
 			{!isRenderMode && (
 				<Timeline
 					scenes={scenes}
@@ -254,7 +280,6 @@ function App() {
 					onSceneChange={(index) => {
 						console.log(`📍 Jumping to scene ${index}`);
 						setSceneIndex(index);
-						// Calculate the start time of this scene
 						const newTime = scenes
 							.slice(0, index)
 							.reduce((acc, s) => acc + (s.duration || 0), 0);
@@ -282,37 +307,51 @@ function App() {
 	);
 }
 
-function SceneWrapper({ scene, onFinished, isPlaying, seekOffset }) {
-	const { View, flow } = scene;
+function SceneWrapper({
+	scene,
+	onFinished,
+	isPlaying,
+	seekOffset,
+	isRenderMode,
+}) {
+	const { View, flow } = scene || {};
 
-	// Pass the animation to useScene hook
-	// seekOffset tells it where in the scene we are (0 = start, duration = end)
+	// Safety check
+	if (!View || !flow) {
+		console.error("SceneWrapper: Invalid scene", scene);
+		return (
+			<div className="flex items-center justify-center w-full h-full bg-red-900/20 text-white">
+				<div className="text-center">
+					<div className="text-red-500 text-xl font-bold mb-2">Scene Error</div>
+					<div className="text-sm">Missing View or flow export</div>
+					<div className="text-xs text-zinc-500 mt-2">
+						Scene: {scene?.name || "undefined"}
+					</div>
+				</div>
+			</div>
+		);
+	}
+
 	useScene(flow, isPlaying ? onFinished : null, isPlaying, seekOffset);
 
-	// Render the scene view
-	// Force re-mount when seeking to reset DOM state.
-	// When playing, key is constant ("playing") to avoid remounts.
-	// When paused (seeking), key changes with offset to force reset.
-	return <View key={isPlaying ? "playing" : seekOffset} />;
+	// Don't use any key - let React handle the remounting via parent key
+	return <View />;
 }
 
 function getTransitionStyle(type, progress) {
 	if (type === "slide") {
-		// Slide in from right
 		return {
 			transform: `translateX(${(1 - progress) * 100}%)`,
 			opacity: 1,
 		};
 	}
 	if (type === "fade") {
-		// Fade in
 		return {
 			transform: "none",
 			opacity: progress,
 		};
 	}
 	if (type === "zoom") {
-		// Zoom in from 0.5 to 1
 		const scale = 0.5 + 0.5 * progress;
 		return {
 			transform: `scale(${scale})`,

@@ -128,28 +128,65 @@ export function calculateDuration(generatorFn) {
 	isCalculating = true;
 
 	// 1. Identify potential globals used in the generator
+	// 1. Identify potential globals used in the generator
 	const code = generatorFn.toString();
 	const identifiers = new Set();
-	// Regex to find function calls: name(
-	const regex = /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
+	// Regex to find function calls: name( or object access: name.
+	const regex = /\b([a-zA-Z_$][a-zA-Z0-9_$]*)(?:\s*\(|\s*\.)/g;
 	let match;
 	while ((match = regex.exec(code)) !== null) {
 		identifiers.add(match[1]);
 	}
 
+	const SAFE_GLOBALS = new Set([
+		"console",
+		"Math",
+		"Date",
+		"JSON",
+		"Object",
+		"Array",
+		"String",
+		"Number",
+		"Boolean",
+		"window",
+		"document",
+		"navigator",
+		"performance",
+		"requestAnimationFrame",
+		"cancelAnimationFrame",
+		"setTimeout",
+		"clearTimeout",
+		"setInterval",
+		"clearInterval",
+		"alert",
+		"prompt",
+		"confirm",
+		"fetch",
+	]);
+
 	// 2. Mock missing globals
 	const mocked = [];
 	identifiers.forEach((id) => {
-		if (typeof window[id] === "undefined") {
-			// Mock it
-			window[id] = (...args) => {
-				// Assume last arg is duration if number, else 0
-				const last = args[args.length - 1];
-				const duration = typeof last === "number" ? last : 0;
-				return tween(duration, () => {});
-			};
-			mocked.push(id);
-		}
+		if (SAFE_GLOBALS.has(id)) return;
+
+		// Always mock for calculation, but save original if exists
+		const original = window[id];
+
+		const mockFn = (...args) => {
+			// Assume last arg is duration if number, else 0
+			const last = args[args.length - 1];
+			const duration = typeof last === "number" ? last : 0;
+			return tween(duration, () => {});
+		};
+		// Add mock .text method
+		mockFn.text = (content, duration = 0) => tween(duration, () => {});
+		// Add generic property access handler (proxy-like)
+		// Since we can't use Proxy easily on window properties without side effects,
+		// we just ensure common methods like .text are there.
+		// For other properties, we might need to add them if they are used.
+
+		window[id] = mockFn;
+		mocked.push({ id, original });
 	});
 
 	try {
@@ -164,11 +201,16 @@ export function calculateDuration(generatorFn) {
 		}
 		return time;
 	} catch (e) {
+		console.warn("Error calculating duration:", e);
 		return 0;
 	} finally {
 		// 3. Cleanup
-		mocked.forEach((id) => {
-			delete window[id];
+		mocked.forEach(({ id, original }) => {
+			if (original === undefined) {
+				delete window[id];
+			} else {
+				window[id] = original;
+			}
 		});
 		isCalculating = false;
 	}
@@ -187,6 +229,58 @@ export function* tween(duration, onUpdate) {
 	if (!isCalculating) {
 		onUpdate(1);
 	}
+}
+
+export function setupGlobals() {
+	// Clear existing globals first
+	const existingIds = Object.keys(window).filter((key) => {
+		const el = document.getElementById(key);
+		return el !== null;
+	});
+
+	// Setup new globals
+	const elements = document.querySelectorAll("[id]");
+	console.log(
+		`🔧 setupGlobals found ${elements.length} elements:`,
+		Array.from(elements).map((e) => e.id)
+	);
+
+	elements.forEach((el) => {
+		const animateFn = (...args) => createAnimation(el.id, ...args);
+
+		// Attach .text() helper
+		animateFn.text = (newText, duration = 1) => {
+			return tween(duration, (t) => {
+				const element = document.getElementById(el.id);
+				if (!element) return;
+
+				// If duration is very short (like in a loop), just set the text immediately at the end
+				if (duration < 0.1) {
+					if (t === 1) element.innerText = newText;
+					return;
+				}
+
+				// Scramble Effect
+				const length = Math.floor(t * newText.length);
+				const visiblePart = newText.substring(0, length);
+				const remaining = newText.length - length;
+				let randomPart = "";
+				const chars =
+					"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+				for (let i = 0; i < Math.min(remaining, 3); i++) {
+					randomPart += chars.charAt(Math.floor(Math.random() * chars.length));
+				}
+				element.innerText = visiblePart + randomPart;
+			});
+		};
+
+		window[el.id] = animateFn;
+		console.log(
+			`  - Registered global for ID: ${el.id}${
+				animateFn.text ? " (with .text)" : ""
+			}`
+		);
+	});
 }
 
 // --- FLOW CONTROL ---
@@ -450,13 +544,64 @@ function* createAnimation(id, ...args) {
 	});
 }
 
-export function setupGlobals() {
+// Store initial styles for reset
+const initialStyles = new Map();
+
+function captureInitialStyles() {
+	// Clear old styles from previous scenes
+	initialStyles.clear();
+
 	document.querySelectorAll("[id]").forEach((el) => {
-		window[el.id] = (...args) => createAnimation(el.id, ...args);
+		const computed = window.getComputedStyle(el);
+		initialStyles.set(el.id, {
+			opacity: computed.opacity,
+			transform: computed.transform,
+			translate: computed.translate,
+			rotate: computed.rotate,
+			scale: computed.scale,
+			backgroundColor: computed.backgroundColor,
+			color: computed.color,
+			borderRadius: computed.borderRadius,
+			filter: computed.filter,
+			// Store gradient variables
+			gradientFrom: computed.getPropertyValue("--tw-gradient-from"),
+			gradientVia: computed.getPropertyValue("--tw-gradient-via"),
+			gradientTo: computed.getPropertyValue("--tw-gradient-to"),
+		});
 	});
 }
 
-// --- THE CRITICAL useScene HOOK ---
+function resetAllElements() {
+	document.querySelectorAll("[id]").forEach((el) => {
+		// Clear all inline styles set by animations
+		const propsToReset = [
+			"opacity",
+			"transform",
+			"translate",
+			"rotate",
+			"scale",
+			"backgroundColor",
+			"color",
+			"borderRadius",
+			"filter",
+			"width",
+			"height",
+			"margin",
+			"padding",
+		];
+
+		propsToReset.forEach((prop) => {
+			el.style[prop] = "";
+		});
+
+		// Reset gradient variables
+		el.style.removeProperty("--tw-gradient-from");
+		el.style.removeProperty("--tw-gradient-via");
+		el.style.removeProperty("--tw-gradient-to");
+	});
+}
+
+// --- THE CRITICAL useScene HOOK - FIXED FOR SMOOTH SEEKING ---
 
 export function useScene(
 	animationCallback,
@@ -466,31 +611,37 @@ export function useScene(
 ) {
 	const iteratorRef = useRef(null);
 	const requestIdRef = useRef(null);
-	const iteratorTimeRef = useRef(0); // Track the iterator's internal time
+	const iteratorTimeRef = useRef(0);
+	const prevSeekOffsetRef = useRef(seekOffset);
+	const mountedRef = useRef(true);
 
 	useEffect(() => {
-		// 1. Check for Render Mode
+		mountedRef.current = true;
+
 		const urlParams = new URLSearchParams(window.location.search);
 		const isRenderMode = urlParams.get("render") === "true";
 
+		// CRITICAL: Setup globals for THIS scene's elements
 		setupGlobals();
 
-		// 2. Initialize iterator with current seek position
-		const initIterator = () => {
-			console.log(`🔄 initIterator: seekOffset=${seekOffset.toFixed(3)}`);
+		// Capture initial styles for THIS scene
+		captureInitialStyles();
+
+		const initIterator = (targetTime) => {
+			// CRITICAL: Reset all elements to their initial state before seeking
+			resetAllElements();
+
 			const iterator = animationCallback();
 			let currentTime = 0;
 
-			// Fast-forward to seekOffset if needed
-			if (seekOffset > 0) {
-				const dt = 1 / 60; // Simulation step
-				// If seeking far ahead, this loop can be heavy.
-				// For now, it's the only way to get to the state.
-				while (currentTime < seekOffset) {
-					const step = Math.min(dt, seekOffset - currentTime);
+			if (targetTime > 0) {
+				// Fast-forward to target time
+				const dt = 1 / 60;
+				while (currentTime < targetTime) {
+					const step = Math.min(dt, targetTime - currentTime);
 					const result = iterator.next(step);
 					if (result.done) {
-						if (onFinished) onFinished();
+						if (onFinished && isPlaying && mountedRef.current) onFinished();
 						return null;
 					}
 					currentTime += step;
@@ -500,66 +651,91 @@ export function useScene(
 			return iterator;
 		};
 
-		// Logic to determine if we need to re-initialize (Seek)
-		// 1. If we don't have an iterator, we must init.
-		// 2. If we ARE NOT playing, we trust seekOffset 100%.
-		// 3. If we ARE playing, we only re-init if the drift is significant (user seek).
-		//    Small drifts are expected due to frame timing differences.
-		const timeDiff = Math.abs(iteratorTimeRef.current - seekOffset);
-
-		// Threshold: 0.5s is generous enough to absorb frame jitter but small enough to catch seeks.
-		// If the user drags the timeline, seekOffset changes rapidly.
-		const isSeeking = timeDiff > 0.5;
-
-		if (
-			!iteratorRef.current ||
-			(!isPlaying && timeDiff > 0.01) ||
-			(isPlaying && isSeeking)
-		) {
-			iteratorRef.current = initIterator();
-		}
-
-		if (!iteratorRef.current) return;
-
 		// --- RENDER MODE (Exporting) ---
 		if (isRenderMode) {
-			window.currentIterator = iteratorRef.current;
-			if (window.onSceneReady) window.onSceneReady();
+			if (!iteratorRef.current) {
+				iteratorRef.current = initIterator(0);
+
+				if (isPlaying) {
+					window.currentIterator = iteratorRef.current;
+					if (window.onSceneReady) window.onSceneReady();
+				}
+			}
 			return;
 		}
 
 		// --- PLAYBACK MODE (Browser) ---
-		if (isPlaying) {
-			let lastTime = performance.now();
 
-			const loop = (now) => {
-				const dt = Math.min((now - lastTime) / 1000, 0.1); // Cap at 0.1s
-				lastTime = now;
+		// Check if we need to seek (user dragged timeline or clicked)
+		const seekDiff = Math.abs(prevSeekOffsetRef.current - seekOffset);
+		const isSeekingBackwards = seekOffset < prevSeekOffsetRef.current;
+		const needsSeek = seekDiff > 0.016; // ~1 frame tolerance at 60fps
 
-				const result = iteratorRef.current.next(dt);
-				iteratorTimeRef.current += dt; // Update internal time
-
-				if (!result.done) {
-					requestIdRef.current = requestAnimationFrame(loop);
-				} else {
-					if (onFinished) onFinished();
-				}
-			};
-
-			requestIdRef.current = requestAnimationFrame(loop);
-		} else {
-		}
-
-		return () => {
+		if (needsSeek) {
+			// Cancel any ongoing animation
 			if (requestIdRef.current) {
 				cancelAnimationFrame(requestIdRef.current);
 				requestIdRef.current = null;
 			}
-		};
 
-		// Dependencies:
-		// - animationCallback: Changes when scene changes
-		// - isPlaying: Toggles playback on/off
-		// - seekOffset: Updates position (causes iterator recreation)
+			// Always reinitialize when seeking backwards or large jumps
+			if (isSeekingBackwards || seekDiff > 0.1) {
+				console.log(
+					`🔄 Reinitializing scene at ${seekOffset.toFixed(
+						2
+					)}s (backwards=${isSeekingBackwards})`
+				);
+			}
+
+			// Reinitialize at the new position
+			iteratorRef.current = initIterator(seekOffset);
+			prevSeekOffsetRef.current = seekOffset;
+
+			// If paused, we're done - the scene is now at the correct position
+			if (!isPlaying) {
+				return;
+			}
+		}
+
+		if (!iteratorRef.current) {
+			iteratorRef.current = initIterator(seekOffset);
+			prevSeekOffsetRef.current = seekOffset;
+		}
+
+		if (isPlaying) {
+			let lastTime = performance.now();
+
+			const loop = (now) => {
+				// Check if component is still mounted
+				if (!mountedRef.current) return;
+
+				const dt = Math.min((now - lastTime) / 1000, 0.1);
+				lastTime = now;
+
+				if (!iteratorRef.current) return;
+
+				const result = iteratorRef.current.next(dt);
+				iteratorTimeRef.current += dt;
+				prevSeekOffsetRef.current = iteratorTimeRef.current;
+
+				if (!result.done) {
+					requestIdRef.current = requestAnimationFrame(loop);
+				} else {
+					if (onFinished && mountedRef.current) onFinished();
+				}
+			};
+
+			requestIdRef.current = requestAnimationFrame(loop);
+		}
+
+		return () => {
+			mountedRef.current = false;
+			if (requestIdRef.current) {
+				cancelAnimationFrame(requestIdRef.current);
+				requestIdRef.current = null;
+			}
+			// Clear the iterator when unmounting
+			iteratorRef.current = null;
+		};
 	}, [animationCallback, isPlaying, seekOffset, onFinished]);
 }

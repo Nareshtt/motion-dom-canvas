@@ -13,7 +13,14 @@ function getDurationFromNode(node) {
 	// Handle function calls
 	if (node.type === "CallExpression") {
 		const callee = node.callee;
-		const name = callee.type === "Identifier" ? callee.name : null;
+		let name = null;
+
+		if (callee.type === "Identifier") {
+			name = callee.name;
+		} else if (callee.type === "MemberExpression") {
+			// Handle object.method() calls like label.text()
+			name = callee.property.name;
+		}
 
 		// yield* all(...) -> Max duration of children
 		if (name === "all") {
@@ -43,14 +50,74 @@ function getDurationFromNode(node) {
 			return delayTime + taskDuration;
 		}
 
+		// .text(content, duration)
+		if (name === "text") {
+			if (node.arguments.length >= 2) {
+				const durationArg = node.arguments[1];
+				if (durationArg && durationArg.type === "NumericLiteral") {
+					return durationArg.value;
+				}
+			}
+			return 0;
+		}
+
 		// Animation helper calls: helper(..., duration)
-		// Check if last argument is a number (duration)
+		// 1. Check if 2nd argument is a number (common for signals/text: val(target, duration))
+		if (node.arguments.length >= 2) {
+			const secondArg = node.arguments[1];
+			if (secondArg && secondArg.type === "NumericLiteral") {
+				return secondArg.value;
+			}
+		}
+
+		// 2. Check if last argument is a number (common for element helpers: box(classes, duration))
 		if (node.arguments.length > 0) {
 			const lastArg = node.arguments[node.arguments.length - 1];
 			if (lastArg && lastArg.type === "NumericLiteral") {
 				return lastArg.value;
 			}
 		}
+	}
+
+	// Handle Loops (ForStatement)
+	if (node.type === "ForStatement") {
+		// Try to estimate loop count
+		let iterations = 1;
+
+		// Check init: let i = 1
+		let start = 0;
+		if (
+			node.init &&
+			node.init.type === "VariableDeclaration" &&
+			node.init.declarations.length > 0
+		) {
+			const initVal = node.init.declarations[0].init;
+			if (initVal && initVal.type === "NumericLiteral") start = initVal.value;
+		}
+
+		// Check test: i <= 5
+		let end = 1;
+		if (
+			node.test &&
+			node.test.type === "BinaryExpression" &&
+			node.test.right.type === "NumericLiteral"
+		) {
+			end = node.test.right.value;
+		}
+
+		iterations = Math.max(1, end - start + 1);
+
+		// Calculate body duration
+		let bodyDuration = 0;
+		if (node.body.type === "BlockStatement") {
+			node.body.body.forEach((stmt) => {
+				if (stmt.type === "ExpressionStatement") {
+					bodyDuration += getDurationFromNode(stmt.expression);
+				}
+			});
+		}
+
+		return bodyDuration * iterations;
 	}
 
 	return 0;
@@ -101,6 +168,8 @@ function calculateFlowDuration(code) {
 						}
 					}
 				}
+			} else if (stmt.type === "ForStatement") {
+				totalDuration += getDurationFromNode(stmt);
 			}
 		});
 

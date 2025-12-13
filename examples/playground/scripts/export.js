@@ -15,7 +15,7 @@ async function exportVideo() {
 	// 1. Start the Vite Server
 	console.log("🔌 Starting local server...");
 	const server = await createServer({
-		server: { port: 0 }, // 0 = random available port
+		server: { port: 0 },
 	});
 	await server.listen();
 	const { port } = server.config.server;
@@ -27,14 +27,27 @@ async function exportVideo() {
 		fs.rmSync(OUTPUT_DIR, { recursive: true, force: true });
 	fs.mkdirSync(OUTPUT_DIR);
 
-	// 3. Launch Browser (The Cameraman)
+	// 3. Launch Browser
 	console.log("📸 Launching browser...");
 	const browser = await puppeteer.launch({
 		headless: "new",
-		defaultViewport: { width: 1920, height: 1080 }, // 1080p
+		defaultViewport: { width: 1920, height: 1080 },
 	});
 	const page = await browser.newPage();
+
+	// Enable console logging from the page for debugging
+	page.on("console", (msg) => {
+		if (msg.text().includes("Scene") || msg.text().includes("transition")) {
+			console.log("Browser:", msg.text());
+		}
+	});
+
 	await page.goto(url, { waitUntil: "networkidle0" });
+
+	// Wait for scenes to be loaded
+	await page.waitForFunction(() => window.scenesLoaded === true, {
+		timeout: 10000,
+	});
 
 	// 4. Capture Frames
 	console.log("🎥 Rendering frames...");
@@ -43,14 +56,38 @@ async function exportVideo() {
 
 	while (!isFinished) {
 		// Advance animation by 1 frame
-		isFinished = await page.evaluate((fps) => window.nextFrame(fps), FPS);
+		isFinished = await page.evaluate((fps) => {
+			if (!window.nextFrame) {
+				console.error("window.nextFrame not available");
+				return true;
+			}
+			return window.nextFrame(fps);
+		}, FPS);
 
-		// Take screenshot
-		const fileName = String(frameCount).padStart(5, "0") + ".png";
-		await page.screenshot({ path: path.join(OUTPUT_DIR, fileName) });
+		// Wait for any pending renders using setTimeout wrapped in evaluate
+		await page.evaluate(
+			() => new Promise((resolve) => setTimeout(resolve, 10))
+		);
+
+		// Take screenshot of the viewport-export-target
+		const element = await page.$(".viewport-export-target");
+		if (element) {
+			const fileName = String(frameCount).padStart(5, "0") + ".png";
+			await element.screenshot({ path: path.join(OUTPUT_DIR, fileName) });
+		} else {
+			console.error("Export target element not found");
+			break;
+		}
 
 		process.stdout.write(`\r   Frames: ${frameCount} `);
 		frameCount++;
+
+		// Safety limit to prevent infinite loops
+		if (frameCount > FPS * 600) {
+			// 10 minutes max
+			console.warn("\n⚠️  Reached safety limit of frames");
+			break;
+		}
 	}
 	console.log("\n✅ Capture complete.");
 
@@ -63,21 +100,38 @@ async function exportVideo() {
 
 	await new Promise((resolve, reject) => {
 		const ffmpeg = spawn("ffmpeg", [
-			"-y", // Overwrite output
+			"-y",
 			"-framerate",
-			String(FPS), // Input framerate
+			String(FPS),
 			"-i",
-			`${OUTPUT_DIR}/%05d.png`, // Input pattern
+			`${OUTPUT_DIR}/%05d.png`,
 			"-c:v",
-			"libx264", // Codec
+			"libx264",
 			"-pix_fmt",
-			"yuv420p", // Pixel format
-			VIDEO_FILE, // Output file
+			"yuv420p",
+			"-preset",
+			"medium", // Add preset for better quality
+			"-crf",
+			"18", // Add CRF for better quality (lower = better, 18 is visually lossless)
+			VIDEO_FILE,
 		]);
 
+		ffmpeg.stdout.on("data", (data) => {
+			process.stdout.write(".");
+		});
+
+		ffmpeg.stderr.on("data", (data) => {
+			// FFmpeg outputs to stderr, but it's not always errors
+			const message = data.toString();
+			if (message.includes("error") || message.includes("Error")) {
+				console.error("FFmpeg error:", message);
+			}
+		});
+
 		ffmpeg.on("close", (code) => {
+			console.log(""); // New line after dots
 			if (code === 0) resolve();
-			else reject(new Error("FFmpeg failed"));
+			else reject(new Error(`FFmpeg failed with code ${code}`));
 		});
 	});
 
@@ -87,6 +141,6 @@ async function exportVideo() {
 }
 
 exportVideo().catch((err) => {
-	console.error(err);
+	console.error("❌ Export failed:", err);
 	process.exit(1);
 });

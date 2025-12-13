@@ -171,6 +171,49 @@ export function parseTailwindValue(className) {
 
 	const isNegative = className.startsWith("-");
 	const clean = isNegative ? className.substring(1) : className;
+
+	// Check for arbitrary values: w-[100px], m-[2rem], opacity-[0.5], translate-y-[-20px]
+	const arbitraryMatch = clean.match(/^[a-z-]+-\[(.+)\]$/);
+	if (arbitraryMatch) {
+		const value = arbitraryMatch[1];
+
+		// Check if the value itself is negative (e.g., [-20px])
+		const valueIsNegative = value.startsWith("-");
+		const cleanValue = valueIsNegative ? value.substring(1) : value;
+
+		// Parse the value and unit
+		const numMatch = cleanValue.match(/^([\d.]+)(.*)$/);
+		if (numMatch) {
+			let num = parseFloat(numMatch[1]);
+			const unit = numMatch[2].trim();
+
+			// Apply negativity from either the class prefix or the value itself
+			if (isNegative || valueIsNegative) {
+				num = -num;
+			}
+
+			// Return the raw number - the caller will handle unit conversion
+			// For px values, divide by 4 to match Tailwind's scale (since we multiply by 4 later)
+			if (unit === "px") {
+				return num / 4;
+			}
+			// For rem values, multiply by 4 (since we multiply by 0.25 later)
+			if (unit === "rem") {
+				return num * 4;
+			}
+			// For unitless or percentage values
+			if (unit === "" || unit === "%") {
+				return num;
+			}
+			// For other units (em, vh, vw, etc.), return as-is
+			return num;
+		}
+
+		// If no number found, return 0
+		return 0;
+	}
+
+	// Standard Tailwind class: w-4, m-8, etc.
 	const match = clean.match(/-(\d+)$/);
 
 	if (match) {

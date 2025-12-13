@@ -26,6 +26,8 @@ export function Timeline({
 }) {
 	const trackRef = useRef(null);
 	const scrollContainerRef = useRef(null);
+	const isDraggingRef = useRef(false);
+	const lastSeekTimeRef = useRef(0);
 
 	// Zoom state: pixels per second. Default 100px = 1s
 	const [zoom, setZoom] = useState(100);
@@ -87,22 +89,51 @@ export function Timeline({
 		};
 	}, [zoom, scrollLeft]);
 
-	const handleTimelineClick = (e) => {
-		if (!trackRef.current) return;
+	const calculateTimeFromMouseX = (clientX) => {
+		if (!trackRef.current) return 0;
 		const rect = trackRef.current.getBoundingClientRect();
-		const x = e.clientX - rect.left;
-
-		// Calculate time based on scroll and zoom
+		const x = clientX - rect.left;
 		const clickTime = (scrollLeft + x) / zoom;
-
-		onSeek(Math.max(0, clickTime));
+		return Math.max(0, Math.min(clickTime, totalDuration));
 	};
 
-	const handleMouseMove = (e) => {
-		if (e.buttons === 1) {
-			// Dragging
-			handleTimelineClick(e);
-		}
+	useEffect(() => {
+		const handleMouseMove = (e) => {
+			if (!isDraggingRef.current) return;
+			const time = calculateTimeFromMouseX(e.clientX);
+			onSeek(time);
+		};
+
+		const handleMouseUp = () => {
+			if (isDraggingRef.current) {
+				isDraggingRef.current = false;
+				document.body.style.cursor = "";
+				document.body.style.userSelect = "";
+			}
+		};
+
+		document.addEventListener("mousemove", handleMouseMove);
+		document.addEventListener("mouseup", handleMouseUp);
+
+		return () => {
+			document.removeEventListener("mousemove", handleMouseMove);
+			document.removeEventListener("mouseup", handleMouseUp);
+		};
+	}, [zoom, scrollLeft, totalDuration, onSeek]);
+
+	const handleMouseDown = (e) => {
+		// Only handle left mouse button
+		if (e.button !== 0) return;
+
+		// Check if clicking on a scene block
+		if (e.target.closest(".scene-block")) return;
+
+		isDraggingRef.current = true;
+		document.body.style.cursor = "grabbing";
+		document.body.style.userSelect = "none";
+
+		const time = calculateTimeFromMouseX(e.clientX);
+		onSeek(time);
 	};
 
 	// Auto-scroll during playback
@@ -111,8 +142,10 @@ export function Timeline({
 		const playheadPos = currentTime * zoom;
 		const width = scrollContainerRef.current.clientWidth;
 
-		if (playheadPos > scrollLeft + width) {
+		if (playheadPos > scrollLeft + width * 0.8) {
 			setScrollLeft(playheadPos - width * 0.2);
+		} else if (playheadPos < scrollLeft + width * 0.2) {
+			setScrollLeft(Math.max(0, playheadPos - width * 0.2));
 		}
 	}, [currentTime, isPlaying, zoom, scrollLeft]);
 
@@ -127,7 +160,10 @@ export function Timeline({
 				{/* Left: Playback Controls */}
 				<div className="flex items-center gap-2">
 					<button
-						onClick={() => onSceneChange(Math.max(0, currentScene - 1))}
+						onClick={() => {
+							const prevScene = Math.max(0, currentScene - 1);
+							onSceneChange(prevScene);
+						}}
 						className="p-2 hover:bg-zinc-800/50 rounded-lg text-zinc-400 hover:text-white transition-all active:scale-95"
 						title="Previous Scene"
 					>
@@ -152,9 +188,10 @@ export function Timeline({
 						<Square size={14} fill="currentColor" />
 					</button>
 					<button
-						onClick={() =>
-							onSceneChange(Math.min(scenes.length - 1, currentScene + 1))
-						}
+						onClick={() => {
+							const nextScene = Math.min(scenes.length - 1, currentScene + 1);
+							onSceneChange(nextScene);
+						}}
 						className="p-2 hover:bg-zinc-800/50 rounded-lg text-zinc-400 hover:text-white transition-all active:scale-95"
 						title="Next Scene"
 					>
@@ -223,8 +260,7 @@ export function Timeline({
 					{/* Tracks Container */}
 					<div
 						ref={trackRef}
-						onMouseDown={handleTimelineClick}
-						onMouseMove={handleMouseMove}
+						onMouseDown={handleMouseDown}
 						className="flex-1 relative cursor-pointer overflow-hidden bg-[#0a0a0a]"
 						style={{
 							backgroundImage:
@@ -233,14 +269,14 @@ export function Timeline({
 						}}
 					>
 						<div
-							className="absolute inset-0"
+							className="absolute inset-0 pointer-events-none"
 							style={{
 								transform: `translateX(${-scrollLeft}px)`,
 								width: `${totalDuration * zoom}px`,
 							}}
 						>
 							{/* Scenes Track */}
-							<div className="absolute top-2 h-12 w-full">
+							<div className="absolute top-2 h-12 w-full pointer-events-auto">
 								{scenes.map((scene, i) => {
 									const startSeconds = scenes
 										.slice(0, i)
@@ -253,7 +289,7 @@ export function Timeline({
 									return (
 										<div
 											key={i}
-											className={`absolute top-0 bottom-0 rounded-lg overflow-hidden transition-all duration-300 group border ${
+											className={`scene-block absolute top-0 bottom-0 rounded-lg overflow-hidden transition-all duration-300 group border ${
 												isActive
 													? "bg-zinc-800/80 border-blue-500/30 shadow-[0_0_20px_rgba(59,130,246,0.1)]"
 													: "bg-zinc-900/40 border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800/40"
@@ -262,9 +298,12 @@ export function Timeline({
 												left: `${startPx}px`,
 												width: `${Math.max(widthPx - 2, 20)}px`,
 											}}
-											onClick={(e) => {
+											onMouseDown={(e) => {
 												e.stopPropagation();
-												onSceneChange(i);
+												const newTime = scenes
+													.slice(0, i)
+													.reduce((acc, s) => acc + (s.duration || 0), 0);
+												onSeek(newTime);
 											}}
 											title={`${scene.name} - ${durationSeconds.toFixed(2)}s`}
 										>
@@ -292,7 +331,7 @@ export function Timeline({
 
 							{/* Audio Track */}
 							{audio && (
-								<div className="absolute top-16 h-10 w-full">
+								<div className="absolute top-16 h-10 w-full pointer-events-none">
 									<div
 										className="absolute top-0 bottom-0 rounded-lg overflow-hidden border bg-emerald-900/20 border-emerald-500/30 shadow-[0_0_20px_rgba(16,185,129,0.05)]"
 										style={{
@@ -322,7 +361,7 @@ export function Timeline({
 
 							{/* Infinite Line */}
 							<div
-								className="absolute top-1/2 -translate-y-1/2 h-px bg-zinc-800/50"
+								className="absolute top-1/2 -translate-y-1/2 h-px bg-zinc-800/50 pointer-events-none"
 								style={{ left: totalDuration * zoom, width: "10000px" }}
 							></div>
 						</div>

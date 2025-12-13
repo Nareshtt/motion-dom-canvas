@@ -8,7 +8,7 @@ export const View = () => (
 		{/* Background Gradient */}
 		<div className="absolute inset-0 bg-gradient-to-br from-[#1a1a1a] to-[#000000] opacity-80"></div>
 
-		{/* Decorative Elements (Restored) */}
+		{/* Decorative Elements */}
 		<div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-[120px]"></div>
 		<div className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] bg-purple-600/10 rounded-full blur-[100px]"></div>
 
@@ -41,17 +41,21 @@ export const View = () => (
 
 export function* flow() {
 	// Reveal Title
-	// Using the global helper: title(targetClasses, duration)
-	yield* title("opacity-100 translate-y-0 scale-100", 1.5);
+	yield* title("opacity-100 translate-y-0", 1.5);
 
 	// Reveal Subtitle and Line together
 	yield* all(
-		subtitle("opacity-100 translate-y-0 tracking-widest", 1),
+		subtitle("opacity-100 translate-y-0", 1),
 		line("w-96 opacity-50", 1.2)
 	);
+
+	// Hold for a moment
+	yield* waitFor(1);
+
+	// Fade out everything
 	yield* all(
-		title("opacity-0", 3),
-		subtitle("opacity-0", 3),
-		line("opacity-0", 3)
+		title("opacity-0", 1),
+		subtitle("opacity-0", 1),
+		line("opacity-0", 1)
 	);
 }
