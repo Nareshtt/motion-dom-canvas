@@ -9,6 +9,8 @@ import {
 	CSS_DEFAULTS,
 } from "./utils.js";
 
+export * from "./components.jsx";
+
 // --- MATH & TIMING ---
 
 function map(from, to, value) {
@@ -128,7 +130,6 @@ export function calculateDuration(generatorFn) {
 	isCalculating = true;
 
 	// 1. Identify potential globals used in the generator
-	// 1. Identify potential globals used in the generator
 	const code = generatorFn.toString();
 	const identifiers = new Set();
 	// Regex to find function calls: name( or object access: name.
@@ -180,10 +181,6 @@ export function calculateDuration(generatorFn) {
 		};
 		// Add mock .text method
 		mockFn.text = (content, duration = 0) => tween(duration, () => {});
-		// Add generic property access handler (proxy-like)
-		// Since we can't use Proxy easily on window properties without side effects,
-		// we just ensure common methods like .text are there.
-		// For other properties, we might need to add them if they are used.
 
 		window[id] = mockFn;
 		mocked.push({ id, original });

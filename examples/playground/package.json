@@ -12,6 +12,7 @@
 	},
 	"dependencies": {
 		"@motion-dom/core": "*",
+		"@motion-dom/ui": "*",
 		"@tailwindcss/vite": "4.1.17",
 		"lucide-react": "^0.560.0",
 		"react": "^19.2.0",

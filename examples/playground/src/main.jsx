@@ -1,10 +1,11 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import './index.css'
-import App from './App.jsx'
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import "./index.css";
+import { MotionCanvasApp } from "@motion-dom/ui";
+import projectData from "virtual:motion-dom-scenes";
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+createRoot(document.getElementById("root")).render(
+	<StrictMode>
+		<MotionCanvasApp projectData={projectData} />
+	</StrictMode>
+);

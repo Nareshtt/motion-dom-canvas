@@ -1,0 +1,13 @@
+{
+	"name": "@motion-dom/export",
+	"version": "0.0.1",
+	"type": "module",
+	"main": "src/index.js",
+	"bin": "./bin/cli.js",
+	"dependencies": {
+		"puppeteer": "^24.10.1"
+	},
+	"peerDependencies": {
+		"vite": "^5.0.0 || ^6.0.0 || ^7.0.0"
+	}
+}
